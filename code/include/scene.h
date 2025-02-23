@@ -52,10 +52,61 @@ public:
    CRCoeff: the coefficient of restitution
    *********************************************************************/
   void handle_collision(Mesh& m1, Mesh& m2,const double& depth, const RowVector3d& contactNormal,const RowVector3d& penPosition, const double CRCoeff){
-    
-    
     /**************TODO: implement this function**************/
-    
+
+    double invMass1 = m1.totalInvMass;
+    double invMass2 = m2.totalInvMass;
+
+    double w1 = invMass1/(invMass1+invMass2);
+    double w2 = invMass2/(invMass1+invMass2);
+
+    m1.COM -= w1 * depth * contactNormal;
+    m2.COM += w2 * depth * contactNormal;
+
+    // 3) Calculate the actual contact point
+    RowVector3d contactPoint = penPosition + depth * contactNormal; // Modified from w2 * depth
+
+    // 4) Calculate moment arms
+    RowVector3d arm1 = contactPoint - m1.COM; // Changed order of subtraction
+    RowVector3d arm2 = contactPoint - m2.COM;
+
+    // 5) Calculate velocities at contact point
+    RowVector3d v1AtContact = m1.comVelocity + m1.angVelocity.cross(arm1);
+    RowVector3d v2AtContact = m2.comVelocity + m2.angVelocity.cross(arm2);
+    RowVector3d relativeVelocity = v1AtContact - v2AtContact;
+
+    // 6) Calculate angular terms for impulse
+    RowVector3d arm1CrossN = arm1.cross(contactNormal);
+    RowVector3d arm2CrossN = arm2.cross(contactNormal);
+
+    // 7) Calculate impulse denominator
+    double denom = invMass1 + invMass2;
+    Vector3d arm1CrossN_col = arm1CrossN.transpose();
+    Vector3d arm2CrossN_col = arm2CrossN.transpose();
+
+    Matrix3d invInertia1 = m1.get_curr_inv_IT();
+    Matrix3d invInertia2 = m2.get_curr_inv_IT();
+
+    denom += arm1CrossN.dot(invInertia1 * arm1CrossN_col);
+    denom += arm2CrossN.dot(invInertia2 * arm2CrossN_col);
+
+    // 8) Calculate impulse magnitude
+    double velocityAlongNormal = relativeVelocity.dot(contactNormal);
+    double j = -(1.0 + CRCoeff) * velocityAlongNormal / denom;
+
+    // 9) Apply impulse
+    RowVector3d impulse = j * contactNormal;
+
+    // Linear velocity updates
+    m1.comVelocity += invMass1 * impulse;
+    m2.comVelocity -= invMass2 * impulse;
+
+    // Angular velocity updates
+    Vector3d torque1 = (arm1.cross(impulse)).transpose();
+    Vector3d torque2 = (arm2.cross(impulse)).transpose();
+
+    m1.angVelocity += (invInertia1 * torque1).transpose();
+    m2.angVelocity -= (invInertia2 * torque2).transpose();
   }
   
   

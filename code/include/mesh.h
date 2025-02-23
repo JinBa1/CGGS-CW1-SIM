@@ -127,7 +127,17 @@ public:
   //return the current inverted inertia tensor around the current COM. Update it by applying the orientation
   Matrix3d get_curr_inv_IT(){
     /****************************TODO: implement this function***************************/
-    return Matrix3d::Zero();
+    // Matrix3d curr_invIT;
+    // for (int i=0; i<3; i++) {
+    //   curr_invIT.row(i)<<QRot(invIT.row(i), orientation);
+    // }
+    // return curr_invIT;
+
+
+    Matrix3d R = Q2RotMatrix(orientation);
+    return R * invIT * R.transpose();
+
+    // return Matrix3d::Zero();
   }
   
   
@@ -135,6 +145,32 @@ public:
   //You need to modify this according to its purpose
   void update_position(double timeStep){
     /***************************TODO: implement this function**********************/
+    // First, update the COM position using the new translational velocity
+
+    COM += timeStep * comVelocity;
+
+    // Eigen::Quaterniond q(orientation.transpose()); // need vector with 4 rows for cosntruction
+    // Eigen::Quaterniond wq(0.0, angVelocity(0), angVelocity(1), angVelocity(2));
+    // Eigen::Quaterniond tmp = wq * q; // quaternion-quaternion multiply
+    // tmp.coeffs() *= (0.5 * timeStep); // scale coz * operator between scalar and quaternion not supported
+    // q.coeffs() += tmp.coeffs();
+    // q.normalize();
+    // orientation << q.w(), q.x(), q.y(), q.z();
+
+    // Create a pure quaternion from the angular velocity scaled by 0.5 * timeStep.
+    // The QExp helper function expects a quaternion of the form (0, angular_part).
+    Eigen::RowVector4d delta;
+    delta << 0.0, 0.5 * timeStep * angVelocity; // angVelocity is a RowVector3d
+    // Compute the incremental rotation quaternion using QExp.
+    Eigen::RowVector4d deltaQuat = QExp(delta);
+    // Update the orientation using semi-implicit Euler:
+    // New orientation = deltaQuat * current orientation.
+    orientation = QMult(deltaQuat, orientation);
+    orientation.normalize();
+
+
+    for (int i=0;i<currV.rows();i++)
+      currV.row(i)<<QRot(origV.row(i), orientation)+COM;
   }
   
   
@@ -240,8 +276,20 @@ public:
   //Updating the linear and angular velocities of the object
   //You need to modify this to integrate from acceleration in the field (basically gravity)
   void update_velocity(double timeStep){
-    
     /***************************TODO: implement this function**********************/
+    // Prepare the total force function
+
+    Vector3d gravitationalAccel;
+    gravitationalAccel << 0.0, -9.8, 0.0;
+    Vector3d totalForce = Vector3d::Zero();
+    totalForce += gravitationalAccel;
+
+    comVelocity += totalForce * timeStep;
+
+    // Prepare the net torque
+    Vector3d totalTorque = Vector3d::Zero();
+
+    angVelocity += (get_curr_inv_IT() * totalTorque) * timeStep;
   }
   
   
@@ -250,6 +298,9 @@ public:
   void integrate(double timeStep){
     update_velocity(timeStep);
     update_position(timeStep);
+    // std::cout << "angular velocity: " << angVelocity << std::endl;
+    // std::cout << "velocity: " << comVelocity << std::endl;
+    // std::cout << "orientation: " << orientation << std::endl;
   }
   
   
