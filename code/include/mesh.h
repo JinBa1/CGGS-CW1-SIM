@@ -146,6 +146,9 @@ public:
   void update_position(double timeStep){
     /***************************TODO: implement this function**********************/
     // First, update the COM position using the new translational velocity
+    if (isFixed) {
+      return;
+    }
 
     COM += timeStep * comVelocity;
 
@@ -159,6 +162,7 @@ public:
 
     // Create a pure quaternion from the angular velocity scaled by 0.5 * timeStep.
     // The QExp helper function expects a quaternion of the form (0, angular_part).
+
     Eigen::RowVector4d delta;
     delta << 0.0, 0.5 * timeStep * angVelocity; // angVelocity is a RowVector3d
     // Compute the incremental rotation quaternion using QExp.
@@ -278,6 +282,13 @@ public:
   void update_velocity(double timeStep){
     /***************************TODO: implement this function**********************/
     // Prepare the total force function
+
+    // If object is fixed, it doesn't move, so velocities should remain zero
+    if (isFixed) {
+      comVelocity.setZero();
+      angVelocity.setZero();
+      return;
+    }
 
     Vector3d gravitationalAccel;
     gravitationalAccel << 0.0, -9.8, 0.0;

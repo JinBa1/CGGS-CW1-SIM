@@ -10,6 +10,9 @@
 #include "mesh.h"
 #include "constraints.h"
 
+#include <chrono>
+#include <iomanip>
+
 using namespace Eigen;
 using namespace std;
 
@@ -25,6 +28,123 @@ public:
   //Mostly for visualization
   MatrixXi allF, constEdges;
   MatrixXd currV, currConstVertices;
+
+  struct SimulationMetrics {
+    // Timing in milliseconds
+    double totalFrameTime = 0.0;
+    double collisionDetectionTime = 0.0;
+    double collisionResolutionTime = 0.0;
+    double constraintResolutionTime = 0.0;
+    
+    // Operation counts
+    int collisionChecksPerformed = 0;
+    int actualCollisionsDetected = 0;
+    int constraintIterations = 0;
+    int constraintsResolved = 0;
+    
+    // Accumulative metrics
+    double totalRunTime = 0.0;
+    double accumulatedCollisionDetectionTime = 0.0;
+    double accumulatedCollisionResolutionTime = 0.0;
+    double accumulatedConstraintResolutionTime = 0.0;
+    
+    int totalFrames = 0;
+    int totalCollisionChecks = 0;
+    int totalCollisionsDetected = 0;
+    int totalConstraintIterations = 0;
+    int totalConstraintsResolved = 0;
+    
+    // Modified reset method - now only resets per-frame metrics
+    void reset() {
+        // Only reset per-frame metrics, not accumulative ones
+        totalFrameTime = 0.0;
+        collisionDetectionTime = 0.0;
+        collisionResolutionTime = 0.0;
+        constraintResolutionTime = 0.0;
+        
+        collisionChecksPerformed = 0;
+        actualCollisionsDetected = 0;
+        constraintIterations = 0;
+        constraintsResolved = 0;
+    }
+    
+    // New method to update accumulative metrics
+    void updateAccumulativeMetrics() {
+        totalFrames++;
+        totalRunTime += totalFrameTime;
+        accumulatedCollisionDetectionTime += collisionDetectionTime;
+        accumulatedCollisionResolutionTime += collisionResolutionTime;
+        accumulatedConstraintResolutionTime += constraintResolutionTime;
+        
+        totalCollisionChecks += collisionChecksPerformed;
+        totalCollisionsDetected += actualCollisionsDetected;
+        totalConstraintIterations += constraintIterations;
+        totalConstraintsResolved += constraintsResolved;
+    }
+    
+    // New method to reset accumulative metrics
+    void resetAccumulativeMetrics() {
+        totalRunTime = 0.0;
+        accumulatedCollisionDetectionTime = 0.0;
+        accumulatedCollisionResolutionTime = 0.0;
+        accumulatedConstraintResolutionTime = 0.0;
+        
+        totalFrames = 0;
+        totalCollisionChecks = 0;
+        totalCollisionsDetected = 0;
+        totalConstraintIterations = 0;
+        totalConstraintsResolved = 0;
+    }
+
+    // Print metrics - per frame
+    void print() const {
+        std::cout << "===== SIMULATION METRICS =====" << std::endl;
+        std::cout << std::fixed << std::setprecision(3);
+        std::cout << "Total frame time: " << totalFrameTime << " ms" << std::endl;
+        std::cout << "  - Collision detection:   " << collisionDetectionTime << " ms" << std::endl;
+        std::cout << "  - Collision resolution:  " << collisionResolutionTime << " ms" << std::endl;
+        std::cout << "  - Constraint resolution: " << constraintResolutionTime << " ms" << std::endl;
+        
+        std::cout << "Collision checks: " << collisionChecksPerformed << std::endl;
+        std::cout << "Collisions detected: " << actualCollisionsDetected << std::endl;
+        std::cout << "Constraint iterations: " << constraintIterations << std::endl;
+        std::cout << "Constraints resolved: " << constraintsResolved << std::endl;
+        std::cout << "==============================" << std::endl;
+    }
+    
+    // Print accumulative metrics
+    void printAccumulative() const {
+        std::cout << "===== ACCUMULATIVE METRICS =====" << std::endl;
+        std::cout << std::fixed << std::setprecision(3);
+        std::cout << "Total frames: " << totalFrames << std::endl;
+        std::cout << "Total run time: " << totalRunTime << " ms" << std::endl;
+        std::cout << "  - Collision detection:   " << accumulatedCollisionDetectionTime << " ms" << std::endl;
+        std::cout << "  - Collision resolution:  " << accumulatedCollisionResolutionTime << " ms" << std::endl;
+        std::cout << "  - Constraint resolution: " << accumulatedConstraintResolutionTime << " ms" << std::endl;
+        
+        std::cout << "Total collision checks: " << totalCollisionChecks << std::endl;
+        std::cout << "Total collisions detected: " << totalCollisionsDetected << std::endl;
+        std::cout << "Total constraint iterations: " << totalConstraintIterations << std::endl;
+        std::cout << "Total constraints resolved: " << totalConstraintsResolved << std::endl;
+        
+        // Averages per frame
+        if (totalFrames > 0) {
+            std::cout << "--- Average per frame ---" << std::endl;
+            std::cout << "Avg frame time: " << totalRunTime / totalFrames << " ms" << std::endl;
+            std::cout << "Avg collision checks: " << (double)totalCollisionChecks / totalFrames << std::endl;
+            std::cout << "Avg collisions detected: " << (double)totalCollisionsDetected / totalFrames << std::endl;
+        }
+        std::cout << "==============================" << std::endl;
+    }
+};
+
+  SimulationMetrics metrics;
+  bool enableMetrics = true;
+
+  int benchmarkFrameCount = 0;
+  int benchmarkTargetFrames = 500;
+  bool benchmarkRunning = false;
+  
   
   
   //adding an objects. You do not need to update this generally
@@ -54,30 +174,65 @@ public:
   void handle_collision(Mesh& m1, Mesh& m2,const double& depth, const RowVector3d& contactNormal,const RowVector3d& penPosition, const double CRCoeff){
     /**************TODO: implement this function**************/
 
+    // Skip collision handling if both objects are fixed
+    if (m1.isFixed && m2.isFixed) {
+        return;
+    }
+    // // Basic collision info
+    // std::cout << "\n==== COLLISION DETECTED ====\n";
+    // std::cout << "m1 fixed: " << m1.isFixed << ", m2 fixed: " << m2.isFixed << std::endl;
+    // std::cout << "m1 invMass: " << m1.totalInvMass << ", m2 invMass: " << m2.totalInvMass << std::endl;
+    // std::cout << "Depth: " << depth << ", CRCoeff: " << CRCoeff << std::endl;
+    // std::cout << "Contact normal: " << contactNormal << std::endl;
+    // std::cout << "Penetration pos: " << penPosition << std::endl;
+
     double invMass1 = m1.totalInvMass;
     double invMass2 = m2.totalInvMass;
-
     double w1 = invMass1/(invMass1+invMass2);
     double w2 = invMass2/(invMass1+invMass2);
+
+    // std::cout << "Weight distribution - w1: " << w1 << ", w2: " << w2 << std::endl;
+    // std::cout << "Pre-correction m1 COM: " << m1.COM << std::endl;
+    // std::cout << "Pre-correction m2 COM: " << m2.COM << std::endl;
 
     m1.COM -= w1 * depth * contactNormal;
     m2.COM += w2 * depth * contactNormal;
 
+    // std::cout << "Post-correction m1 COM: " << m1.COM << std::endl;
+    // std::cout << "Post-correction m2 COM: " << m2.COM << std::endl;
+
     // 3) Calculate the actual contact point
     RowVector3d contactPoint = penPosition + depth * contactNormal; // Modified from w2 * depth
+    // std::cout << "Contact point: " << contactPoint << std::endl;
+
 
     // 4) Calculate moment arms
     RowVector3d arm1 = contactPoint - m1.COM; // Changed order of subtraction
     RowVector3d arm2 = contactPoint - m2.COM;
 
+    // std::cout << "arm1: " << arm1 << ", length: " << arm1.norm() << std::endl;
+    // std::cout << "arm2: " << arm2 << ", length: " << arm2.norm() << std::endl;
+
     // 5) Calculate velocities at contact point
+
+    // // Velocities
+    // std::cout << "m1 velocity: " << m1.comVelocity << std::endl;
+    // std::cout << "m2 velocity: " << m2.comVelocity << std::endl;
+    // std::cout << "m1 ang velocity: " << m1.angVelocity << std::endl;
+    // std::cout << "m2 ang velocity: " << m2.angVelocity << std::endl;
     RowVector3d v1AtContact = m1.comVelocity + m1.angVelocity.cross(arm1);
     RowVector3d v2AtContact = m2.comVelocity + m2.angVelocity.cross(arm2);
     RowVector3d relativeVelocity = v1AtContact - v2AtContact;
 
+    // std::cout << "v1 at contact: " << v1AtContact << std::endl;
+    // std::cout << "v2 at contact: " << v2AtContact << std::endl;
+    // std::cout << "Relative velocity: " << relativeVelocity << std::endl;
+
     // 6) Calculate angular terms for impulse
     RowVector3d arm1CrossN = arm1.cross(contactNormal);
     RowVector3d arm2CrossN = arm2.cross(contactNormal);
+
+    // std::cout << "Checkpoint 3" << std::endl;
 
     // 7) Calculate impulse denominator
     double denom = invMass1 + invMass2;
@@ -87,26 +242,40 @@ public:
     Matrix3d invInertia1 = m1.get_curr_inv_IT();
     Matrix3d invInertia2 = m2.get_curr_inv_IT();
 
+    // std::cout << "m1 invIT rank: " << invInertia1.rows() << "x" << invInertia1.cols() << std::endl;
+    // std::cout << "m2 invIT rank: " << invInertia2.rows() << "x" << invInertia2.cols() << std::endl;
+
     denom += arm1CrossN.dot(invInertia1 * arm1CrossN_col);
     denom += arm2CrossN.dot(invInertia2 * arm2CrossN_col);
 
+    // std::cout << "arm1CrossN: " << arm1CrossN << std::endl;
+    // std::cout << "arm2CrossN: " << arm2CrossN << std::endl;
+
     // 8) Calculate impulse magnitude
+    // std::cout << "==== IMPULSE CALCULATION ====\n";
     double velocityAlongNormal = relativeVelocity.dot(contactNormal);
     double j = -(1.0 + CRCoeff) * velocityAlongNormal / denom;
 
     // 9) Apply impulse
     RowVector3d impulse = j * contactNormal;
 
+    // std::cout << "==== END COLLISION HANDLING ====\n\n";
+
     // Linear velocity updates
     m1.comVelocity += invMass1 * impulse;
     m2.comVelocity -= invMass2 * impulse;
+
 
     // Angular velocity updates
     Vector3d torque1 = (arm1.cross(impulse)).transpose();
     Vector3d torque2 = (arm2.cross(impulse)).transpose();
 
+
+
     m1.angVelocity += (invInertia1 * torque1).transpose();
     m2.angVelocity -= (invInertia2 * torque2).transpose();
+
+    // std::cout << "==== END UPDATING VELOCITIES ====" << std::endl;
   }
   
   
@@ -118,34 +287,77 @@ public:
    3. updating the visual scene in fullV and fullT
    *********************************************************************/
   void update_scene(double timeStep, double CRCoeff, int maxIterations, double tolerance){
+
+    if (enableMetrics) metrics.reset();
+    auto frameStart = std::chrono::high_resolution_clock::now();
     
     //integrating velocity, position and orientation from forces and previous states
     for (int i=0;i<meshes.size();i++)
       meshes[i].integrate(timeStep);
     
     //detecting and handling collisions when found
+    auto collisionDetectionStart = std::chrono::high_resolution_clock::now();
+
     //This is done exhaustively: checking every two objects in the scene.
     double depth;
     RowVector3d contactNormal, penPosition;
-    for (int i=0;i<meshes.size();i++)
-      for (int j=i+1;j<meshes.size();j++)
-        if (meshes[i].is_collide(meshes[j],depth, contactNormal, penPosition))
-          handle_collision(meshes[i], meshes[j],depth, contactNormal, penPosition,CRCoeff);
+    for (int i=0;i<meshes.size();i++) {
+      for (int j=i+1;j<meshes.size();j++) {
+      if (enableMetrics) metrics.collisionChecksPerformed++; // recording times checked
+
+        if (meshes[i].is_collide(meshes[j],depth, contactNormal, penPosition)) {
+          if (enableMetrics) metrics.actualCollisionsDetected++; //update metric
+          auto collisionResolutionStart = std::chrono::high_resolution_clock::now(); // collision resolution timing
+
+          handle_collision(meshes[i], meshes[j],depth, contactNormal, penPosition,CRCoeff); 
+
+          if (enableMetrics) { // record metrics
+            auto collisionResolutionEnd = std::chrono::high_resolution_clock::now();
+            metrics.collisionResolutionTime += std::chrono::duration<double, std::milli>(
+              collisionResolutionEnd - collisionResolutionStart).count();
+          }
+        }
+      }
+    }
     
     //colliding with the pseudo-mesh of the ground
     for (int i=0;i<meshes.size();i++){
       int minyIndex;
       double minY = meshes[i].currV.col(1).minCoeff(&minyIndex);
+      if (enableMetrics) metrics.collisionChecksPerformed++; // record checks performed
+
       //linear resolution
-      if (minY<=0.0)
-        handle_collision(meshes[i], groundMesh, minY, {0.0,1.0,0.0},meshes[i].currV.row(minyIndex),CRCoeff);
+      if (minY<=0.0) {
+        if (enableMetrics) metrics.actualCollisionsDetected++;
+
+        auto groundCollisionStart = std::chrono::high_resolution_clock::now();
+        handle_collision(meshes[i], groundMesh, minY, {0.0,1.0,0.0},meshes[i].currV.row(minyIndex),CRCoeff); 
+        auto groundCollisionEnd = std::chrono::high_resolution_clock::now();
+
+        if (enableMetrics) {
+          metrics.collisionResolutionTime += std::chrono::duration<double, std::milli>(
+              groundCollisionEnd - groundCollisionStart).count();
+        }
+      }
     }
+
+    // End collision detection timing (AFTER ground collision detection)
+    if (enableMetrics) {
+      auto collisionDetectionEnd = std::chrono::high_resolution_clock::now();
+      metrics.collisionDetectionTime += std::chrono::duration<double, std::milli>(
+          collisionDetectionEnd - collisionDetectionStart).count();
+    }
+
+    // CONSTRAINT RESOLUTION TIMING
+    auto constraintResolutionStart = std::chrono::high_resolution_clock::now();
     
     //Resolving constraints
     int currIteration=0;
     int zeroStreak=0;  //how many consecutive constraints are already below tolerance without any change; the algorithm stops if all are.
     int currConstIndex=0;
     while ((zeroStreak<constraints.size())&&(currIteration*constraints.size()<maxIterations)){
+
+      if (enableMetrics) metrics.constraintIterations++; // count itertaions
       
       Constraint currConstraint=constraints[currConstIndex];
       
@@ -165,6 +377,8 @@ public:
       if (positionWasValid){
         zeroStreak++;
       }else{
+        if (enableMetrics) metrics.constraintsResolved++; // count resolved
+
         //only update the COM and angular velocity, don't both updating all currV because it might change again during this loop!
         zeroStreak=0;
         
@@ -199,6 +413,13 @@ public:
       currIteration++;
       currConstIndex=(currConstIndex+1)%(constraints.size());
     }
+
+    // End constraint resolution timing
+    if (enableMetrics) {
+      auto constraintResolutionEnd = std::chrono::high_resolution_clock::now();
+      metrics.constraintResolutionTime += std::chrono::duration<double, std::milli>(
+          constraintResolutionEnd - constraintResolutionStart).count();
+    }
     
     if (currIteration*constraints.size()>=maxIterations)
       cout<<"Constraint resolution reached maxIterations without resolving!"<<endl;
@@ -218,6 +439,17 @@ public:
     for (int i=0;i<constraints.size();i+=2){   //jumping bc we have constraint pairs
       currConstVertices.row(i) = meshes[constraints[i].m1].currV.row(constraints[i].v1);
       currConstVertices.row(i+1) = meshes[constraints[i].m2].currV.row(constraints[i].v2);
+    }
+
+    // End frame timing
+    if (enableMetrics) {
+      auto frameEnd = std::chrono::high_resolution_clock::now();
+      metrics.totalFrameTime = std::chrono::duration<double, std::milli>(
+          frameEnd - frameStart).count();
+      
+      // Print metrics
+      metrics.print();
+      metrics.updateAccumulativeMetrics();
     }
   }
   
@@ -243,7 +475,11 @@ public:
       RowVector4d userOrientation;
       sceneFileHandle>>MESHFileName>>density>>isFixed>>userCOM(0)>>userCOM(1)>>userCOM(2)>>userOrientation(0)>>userOrientation(1)>>userOrientation(2)>>userOrientation(3);
       userOrientation.normalize();
+
+      // Print info before loading
+      std::cout << "Loading mesh " << i << ": " << MESHFileName << std::endl;
       readMESH(DATA_PATH "/" + MESHFileName,objV,objF, objT);
+      std::cout << "Loaded mesh " << i << ": " << MESHFileName << std::endl;
       
       //fixing weird orientation problem
       MatrixXi tempF(objF.rows(),3);
@@ -253,6 +489,12 @@ public:
       add_mesh(objV,objF, objT,density, isFixed, userCOM, userOrientation);
       cout << "COM: " << userCOM <<endl;
       cout << "orientation: " << userOrientation <<endl;
+
+      // Print dimensions
+      std::cout << "Mesh dimensions: V(" << objV.rows() << "x" << objV.cols() 
+      << "), F(" << objF.rows() << "x" << objF.cols() 
+      << "), T(" << objT.rows() << "x" << objT.cols() << ")" << std::endl;
+
     }
     
     //adding ground mesh artifically

@@ -121,8 +121,10 @@ public:
 
     return false;
     
-    //stub implementation
-    
+    // //stub implementation
+    // correctedCOMVelocities = currCOMVelocities;
+    // correctedAngVelocities = currAngVelocities;
+    // return true;
   }
   
   //projects the position unto the constraint
@@ -168,8 +170,11 @@ public:
     correctedCOMPositions.row(1) += deltaP2;
 
     return false;
-    //stub implementation
 
+
+    // //stub implementation
+    // correctedCOMPositions = currCOMPositions;
+    // return true;
   }
   
 };
