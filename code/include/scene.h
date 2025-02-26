@@ -13,12 +13,20 @@
 #include <chrono>
 #include <iomanip>
 
+#include "spatial_hash.h"
+#include "constraint_graph.h"
+
 using namespace Eigen;
 using namespace std;
 
 
 //This class contains the entire scene operations, and the engine time loop.
 class Scene{
+private:
+  SpatialHash spatialGrid;
+  ConstraintGraph constraintGraph;
+
+
 public:
   double currTime;
   vector<Mesh> meshes;
@@ -145,7 +153,22 @@ public:
   int benchmarkTargetFrames = 500;
   bool benchmarkRunning = false;
   
+  enum class CollisionAcceleration {
+    None,            // Brute force O(n²) collision checking
+    SpatialHash,     // Spatial hash grid
+    BVH              // Bounding Volume Hierarchy (if implemented)
+  };
+
+  enum class ConstraintSolver {
+    Sequential,      // Process constraints sequentially (original method)
+    Islands          // Process constraints by independent islands
+  };
   
+  // Configuration for acceleration techniques
+  CollisionAcceleration collisionAccelMethod = CollisionAcceleration::None;
+  ConstraintSolver constraintSolverMethod = ConstraintSolver::Sequential;
+  float spatialGridCellSize = 2.0f;
+  bool autoAdjustGridSize = true;
   
   //adding an objects. You do not need to update this generally
   void add_mesh(const MatrixXd& V, const MatrixXi& F, const MatrixXi& T, const double density, const bool isFixed, const RowVector3d& COM, const RowVector4d& orientation){
@@ -298,25 +321,82 @@ public:
     //detecting and handling collisions when found
     auto collisionDetectionStart = std::chrono::high_resolution_clock::now();
 
-    //This is done exhaustively: checking every two objects in the scene.
-    double depth;
-    RowVector3d contactNormal, penPosition;
-    for (int i=0;i<meshes.size();i++) {
-      for (int j=i+1;j<meshes.size();j++) {
-      if (enableMetrics) metrics.collisionChecksPerformed++; // recording times checked
 
-        if (meshes[i].is_collide(meshes[j],depth, contactNormal, penPosition)) {
-          if (enableMetrics) metrics.actualCollisionsDetected++; //update metric
-          auto collisionResolutionStart = std::chrono::high_resolution_clock::now(); // collision resolution timing
-
-          handle_collision(meshes[i], meshes[j],depth, contactNormal, penPosition,CRCoeff); 
-
-          if (enableMetrics) { // record metrics
-            auto collisionResolutionEnd = std::chrono::high_resolution_clock::now();
-            metrics.collisionResolutionTime += std::chrono::duration<double, std::milli>(
-              collisionResolutionEnd - collisionResolutionStart).count();
+    // Detect and handle collisions using the selected acceleration method
+    switch (collisionAccelMethod) {
+      case CollisionAcceleration::SpatialHash: {
+        // Use spatial hashing for broad-phase collision detection
+        if (autoAdjustGridSize) {
+          spatialGrid.optimizeCellSize(meshes);
+        } else {
+          spatialGrid.setCellSize(spatialGridCellSize);
+        }
+        
+        // Clear and rebuild the spatial grid
+        spatialGrid.clear();
+        for (int i = 0; i < meshes.size(); i++) {
+          spatialGrid.insert(i, meshes[i].currV);
+        }
+        
+        // Get potential collision pairs
+        std::vector<std::pair<int, int>> potentialPairs = spatialGrid.getPotentialCollisionPairs();
+        
+        if (enableMetrics) metrics.collisionChecksPerformed += potentialPairs.size();
+        
+        // Process collision pairs
+        double depth;
+        RowVector3d contactNormal, penPosition;
+        
+        for (const auto& pair : potentialPairs) {
+          int i = pair.first;
+          int j = pair.second;
+          
+          if (meshes[i].is_collide(meshes[j], depth, contactNormal, penPosition)) {
+            if (enableMetrics) metrics.actualCollisionsDetected++;
+            auto collisionResolutionStart = std::chrono::high_resolution_clock::now();
+            
+            handle_collision(meshes[i], meshes[j], depth, contactNormal, penPosition, CRCoeff);
+            
+            if (enableMetrics) {
+              auto collisionResolutionEnd = std::chrono::high_resolution_clock::now();
+              metrics.collisionResolutionTime += std::chrono::duration<double, std::milli>(
+                collisionResolutionEnd - collisionResolutionStart).count();
+            }
           }
         }
+        
+        break;
+      }
+      
+      case CollisionAcceleration::BVH:
+        // BVH implementation would go here
+        // For now, fall through to the brute force method
+        
+      case CollisionAcceleration::None:
+      default: {
+        // Original brute force O(n²) approach
+        double depth;
+        RowVector3d contactNormal, penPosition;
+        
+        for (int i=0;i<meshes.size();i++) {
+          for (int j=i+1;j<meshes.size();j++) {
+            if (enableMetrics) metrics.collisionChecksPerformed++;
+            
+            if (meshes[i].is_collide(meshes[j], depth, contactNormal, penPosition)) {
+              if (enableMetrics) metrics.actualCollisionsDetected++;
+              auto collisionResolutionStart = std::chrono::high_resolution_clock::now();
+              
+              handle_collision(meshes[i], meshes[j], depth, contactNormal, penPosition, CRCoeff);
+              
+              if (enableMetrics) {
+                auto collisionResolutionEnd = std::chrono::high_resolution_clock::now();
+                metrics.collisionResolutionTime += std::chrono::duration<double, std::milli>(
+                  collisionResolutionEnd - collisionResolutionStart).count();
+                }
+            }
+          }
+        }
+        break;
       }
     }
     
@@ -351,67 +431,188 @@ public:
     // CONSTRAINT RESOLUTION TIMING
     auto constraintResolutionStart = std::chrono::high_resolution_clock::now();
     
-    //Resolving constraints
-    int currIteration=0;
-    int zeroStreak=0;  //how many consecutive constraints are already below tolerance without any change; the algorithm stops if all are.
-    int currConstIndex=0;
-    while ((zeroStreak<constraints.size())&&(currIteration*constraints.size()<maxIterations)){
-
-      if (enableMetrics) metrics.constraintIterations++; // count itertaions
-      
-      Constraint currConstraint=constraints[currConstIndex];
-      
-      RowVector3d origConstPos1=meshes[currConstraint.m1].origV.row(currConstraint.v1);
-      RowVector3d origConstPos2=meshes[currConstraint.m2].origV.row(currConstraint.v2);
-      
-      RowVector3d currConstPos1 = QRot(origConstPos1, meshes[currConstraint.m1].orientation)+meshes[currConstraint.m1].COM;
-      RowVector3d currConstPos2 = QRot(origConstPos2, meshes[currConstraint.m2].orientation)+meshes[currConstraint.m2].COM;
-      
-      MatrixXd currCOMPositions(2,3); currCOMPositions<<meshes[currConstraint.m1].COM, meshes[currConstraint.m2].COM;
-      MatrixXd currConstPositions(2,3); currConstPositions<<currConstPos1, currConstPos2;
-      
-      MatrixXd correctedCOMPositions;
-      
-      bool positionWasValid=currConstraint.resolve_position_constraint(currCOMPositions, currConstPositions,correctedCOMPositions, tolerance);
-      
-      if (positionWasValid){
-        zeroStreak++;
-      }else{
-        if (enableMetrics) metrics.constraintsResolved++; // count resolved
-
-        //only update the COM and angular velocity, don't both updating all currV because it might change again during this loop!
-        zeroStreak=0;
+    switch (constraintSolverMethod) {
+      case ConstraintSolver::Islands: {
+        // Build the constraint graph and identify islands
+        constraintGraph.buildGraph(constraints);
+        const auto& islands = constraintGraph.getIslands();
         
-        meshes[currConstraint.m1].COM = correctedCOMPositions.row(0);
-        meshes[currConstraint.m2].COM = correctedCOMPositions.row(1);
-        
-        //resolving velocity
-        currConstPos1 = QRot(origConstPos1, meshes[currConstraint.m1].orientation)+meshes[currConstraint.m1].COM;
-        currConstPos2 = QRot(origConstPos2, meshes[currConstraint.m2].orientation)+meshes[currConstraint.m2].COM;
-        //cout<<"(currConstPos1-currConstPos2).norm(): "<<(currConstPos1-currConstPos2).norm()<<endl;
-        //cout<<"(meshes[currConstraint.m1].currV.row(currConstraint.v1)-meshes[currConstraint.m2].currV.row(currConstraint.v2)).norm(): "<<(meshes[currConstraint.m1].currV.row(currConstraint.v1)-meshes[currConstraint.m2].currV.row(currConstraint.v2)).norm()<<endl;
-        currCOMPositions<<meshes[currConstraint.m1].COM, meshes[currConstraint.m2].COM;
-        currConstPositions<<currConstPos1, currConstPos2;
-        MatrixXd currCOMVelocities(2,3); currCOMVelocities<<meshes[currConstraint.m1].comVelocity, meshes[currConstraint.m2].comVelocity;
-        MatrixXd currAngVelocities(2,3); currAngVelocities<<meshes[currConstraint.m1].angVelocity, meshes[currConstraint.m2].angVelocity;
-        
-        Matrix3d invInertiaTensor1=meshes[currConstraint.m1].get_curr_inv_IT();
-        Matrix3d invInertiaTensor2=meshes[currConstraint.m2].get_curr_inv_IT();
-        MatrixXd correctedCOMVelocities, correctedAngVelocities, correctedCOMPositions;
-        
-        bool velocityWasValid=currConstraint.resolve_velocity_constraint(currCOMPositions, currConstPositions, currCOMVelocities, currAngVelocities, invInertiaTensor1, invInertiaTensor2, correctedCOMVelocities,correctedAngVelocities, tolerance);
-        
-        if (!velocityWasValid){
-          meshes[currConstraint.m1].comVelocity =correctedCOMVelocities.row(0);
-          meshes[currConstraint.m2].comVelocity =correctedCOMVelocities.row(1);
+        // Process each island independently
+        for (size_t islandIdx = 0; islandIdx < islands.size(); islandIdx++) {
+          std::vector<int> islandConstraints = constraintGraph.getConstraintsForIsland(islandIdx, constraints);
           
-          meshes[currConstraint.m1].angVelocity =correctedAngVelocities.row(0);
-          meshes[currConstraint.m2].angVelocity =correctedAngVelocities.row(1);
+          // Skip islands with no constraints
+          if (islandConstraints.empty()) continue;
+          
+          // Process constraints for this island
+          int currIteration = 0;
+          int zeroStreak = 0;
+          int currConstraintIdx = 0;
+          
+          while ((zeroStreak < islandConstraints.size()) && 
+                 (currIteration * islandConstraints.size() < maxIterations)) {
+            
+            if (enableMetrics) metrics.constraintIterations++;
+            
+            int actualConstraintIdx = islandConstraints[currConstraintIdx];
+            Constraint& currConstraint = constraints[actualConstraintIdx];
+            
+            RowVector3d origConstPos1 = meshes[currConstraint.m1].origV.row(currConstraint.v1);
+            RowVector3d origConstPos2 = meshes[currConstraint.m2].origV.row(currConstraint.v2);
+            
+            RowVector3d currConstPos1 = QRot(origConstPos1, meshes[currConstraint.m1].orientation) + 
+                                         meshes[currConstraint.m1].COM;
+            RowVector3d currConstPos2 = QRot(origConstPos2, meshes[currConstraint.m2].orientation) + 
+                                         meshes[currConstraint.m2].COM;
+            
+            MatrixXd currCOMPositions(2,3); 
+            currCOMPositions << meshes[currConstraint.m1].COM, meshes[currConstraint.m2].COM;
+            
+            MatrixXd currConstPositions(2,3); 
+            currConstPositions << currConstPos1, currConstPos2;
+            
+            MatrixXd correctedCOMPositions;
+            bool positionWasValid = currConstraint.resolve_position_constraint(
+                currCOMPositions, currConstPositions, correctedCOMPositions, tolerance);
+            
+            if (positionWasValid) {
+              zeroStreak++;
+            } else {
+              if (enableMetrics) metrics.constraintsResolved++;
+              
+              zeroStreak = 0;
+              
+              meshes[currConstraint.m1].COM = correctedCOMPositions.row(0);
+              meshes[currConstraint.m2].COM = correctedCOMPositions.row(1);
+              
+              // Resolving velocity
+              currConstPos1 = QRot(origConstPos1, meshes[currConstraint.m1].orientation) + 
+                               meshes[currConstraint.m1].COM;
+              currConstPos2 = QRot(origConstPos2, meshes[currConstraint.m2].orientation) + 
+                               meshes[currConstraint.m2].COM;
+              
+              currCOMPositions << meshes[currConstraint.m1].COM, meshes[currConstraint.m2].COM;
+              currConstPositions << currConstPos1, currConstPos2;
+              
+              MatrixXd currCOMVelocities(2,3); 
+              currCOMVelocities << meshes[currConstraint.m1].comVelocity, meshes[currConstraint.m2].comVelocity;
+              
+              MatrixXd currAngVelocities(2,3); 
+              currAngVelocities << meshes[currConstraint.m1].angVelocity, meshes[currConstraint.m2].angVelocity;
+              
+              Matrix3d invInertiaTensor1 = meshes[currConstraint.m1].get_curr_inv_IT();
+              Matrix3d invInertiaTensor2 = meshes[currConstraint.m2].get_curr_inv_IT();
+              
+              MatrixXd correctedCOMVelocities, correctedAngVelocities;
+              
+              bool velocityWasValid = currConstraint.resolve_velocity_constraint(
+                  currCOMPositions, currConstPositions, currCOMVelocities, currAngVelocities,
+                  invInertiaTensor1, invInertiaTensor2, 
+                  correctedCOMVelocities, correctedAngVelocities, tolerance);
+              
+              if (!velocityWasValid) {
+                meshes[currConstraint.m1].comVelocity = correctedCOMVelocities.row(0);
+                meshes[currConstraint.m2].comVelocity = correctedCOMVelocities.row(1);
+                
+                meshes[currConstraint.m1].angVelocity = correctedAngVelocities.row(0);
+                meshes[currConstraint.m2].angVelocity = correctedAngVelocities.row(1);
+              }
+            }
+            
+            currIteration++;
+            currConstraintIdx = (currConstraintIdx + 1) % islandConstraints.size();
+          }
+          
+          if (currIteration * islandConstraints.size() >= maxIterations) {
+            std::cout << "Island " << islandIdx << " constraint resolution reached maxIterations!" << std::endl;
+          }
         }
+        break;
       }
       
-      currIteration++;
-      currConstIndex=(currConstIndex+1)%(constraints.size());
+      case ConstraintSolver::Sequential:
+      default: {
+        // Original sequential constraint resolution
+        int currIteration = 0;
+        int zeroStreak = 0;
+        int currConstIndex = 0;
+        
+        while ((zeroStreak < constraints.size()) && (currIteration * constraints.size() < maxIterations)) {
+          if (enableMetrics) metrics.constraintIterations++;
+          
+          Constraint& currConstraint = constraints[currConstIndex];
+          
+          RowVector3d origConstPos1 = meshes[currConstraint.m1].origV.row(currConstraint.v1);
+          RowVector3d origConstPos2 = meshes[currConstraint.m2].origV.row(currConstraint.v2);
+          
+          RowVector3d currConstPos1 = QRot(origConstPos1, meshes[currConstraint.m1].orientation) + 
+                                       meshes[currConstraint.m1].COM;
+          RowVector3d currConstPos2 = QRot(origConstPos2, meshes[currConstraint.m2].orientation) + 
+                                       meshes[currConstraint.m2].COM;
+          
+          MatrixXd currCOMPositions(2,3); 
+          currCOMPositions << meshes[currConstraint.m1].COM, meshes[currConstraint.m2].COM;
+          
+          MatrixXd currConstPositions(2,3); 
+          currConstPositions << currConstPos1, currConstPos2;
+          
+          MatrixXd correctedCOMPositions;
+          bool positionWasValid = currConstraint.resolve_position_constraint(
+              currCOMPositions, currConstPositions, correctedCOMPositions, tolerance);
+          
+          if (positionWasValid) {
+            zeroStreak++;
+          } else {
+            if (enableMetrics) metrics.constraintsResolved++;
+            
+            zeroStreak = 0;
+            
+            meshes[currConstraint.m1].COM = correctedCOMPositions.row(0);
+            meshes[currConstraint.m2].COM = correctedCOMPositions.row(1);
+            
+            // Resolving velocity
+            currConstPos1 = QRot(origConstPos1, meshes[currConstraint.m1].orientation) + 
+                             meshes[currConstraint.m1].COM;
+            currConstPos2 = QRot(origConstPos2, meshes[currConstraint.m2].orientation) + 
+                             meshes[currConstraint.m2].COM;
+            
+            currCOMPositions << meshes[currConstraint.m1].COM, meshes[currConstraint.m2].COM;
+            currConstPositions << currConstPos1, currConstPos2;
+            
+            MatrixXd currCOMVelocities(2,3); 
+            currCOMVelocities << meshes[currConstraint.m1].comVelocity, meshes[currConstraint.m2].comVelocity;
+            
+            MatrixXd currAngVelocities(2,3); 
+            currAngVelocities << meshes[currConstraint.m1].angVelocity, meshes[currConstraint.m2].angVelocity;
+            
+            Matrix3d invInertiaTensor1 = meshes[currConstraint.m1].get_curr_inv_IT();
+            Matrix3d invInertiaTensor2 = meshes[currConstraint.m2].get_curr_inv_IT();
+            
+            MatrixXd correctedCOMVelocities, correctedAngVelocities;
+            
+            bool velocityWasValid = currConstraint.resolve_velocity_constraint(
+                currCOMPositions, currConstPositions, currCOMVelocities, currAngVelocities,
+                invInertiaTensor1, invInertiaTensor2, 
+                correctedCOMVelocities, correctedAngVelocities, tolerance);
+            
+            if (!velocityWasValid) {
+              meshes[currConstraint.m1].comVelocity = correctedCOMVelocities.row(0);
+              meshes[currConstraint.m2].comVelocity = correctedCOMVelocities.row(1);
+              
+              meshes[currConstraint.m1].angVelocity = correctedAngVelocities.row(0);
+              meshes[currConstraint.m2].angVelocity = correctedAngVelocities.row(1);
+            }
+          }
+          
+          currIteration++;
+          currConstIndex = (currConstIndex + 1) % constraints.size();
+        }
+        
+        if (currIteration * constraints.size() >= maxIterations) {
+          std::cout << "Constraint resolution reached maxIterations without resolving!" << std::endl;
+        }
+        break;
+      }
     }
 
     // End constraint resolution timing
@@ -421,8 +622,6 @@ public:
           constraintResolutionEnd - constraintResolutionStart).count();
     }
     
-    if (currIteration*constraints.size()>=maxIterations)
-      cout<<"Constraint resolution reached maxIterations without resolving!"<<endl;
     
     currTime+=timeStep;
     
@@ -448,7 +647,7 @@ public:
           frameEnd - frameStart).count();
       
       // Print metrics
-      metrics.print();
+      // metrics.print();
       metrics.updateAccumulativeMetrics();
     }
   }
@@ -477,9 +676,9 @@ public:
       userOrientation.normalize();
 
       // Print info before loading
-      std::cout << "Loading mesh " << i << ": " << MESHFileName << std::endl;
+      // std::cout << "Loading mesh " << i << ": " << MESHFileName << std::endl;
       readMESH(DATA_PATH "/" + MESHFileName,objV,objF, objT);
-      std::cout << "Loaded mesh " << i << ": " << MESHFileName << std::endl;
+      // std::cout << "Loaded mesh " << i << ": " << MESHFileName << std::endl;
       
       //fixing weird orientation problem
       MatrixXi tempF(objF.rows(),3);
@@ -487,13 +686,13 @@ public:
       objF=tempF;
       
       add_mesh(objV,objF, objT,density, isFixed, userCOM, userOrientation);
-      cout << "COM: " << userCOM <<endl;
-      cout << "orientation: " << userOrientation <<endl;
+      // cout << "COM: " << userCOM <<endl;
+      // cout << "orientation: " << userOrientation <<endl;
 
-      // Print dimensions
-      std::cout << "Mesh dimensions: V(" << objV.rows() << "x" << objV.cols() 
-      << "), F(" << objF.rows() << "x" << objF.cols() 
-      << "), T(" << objT.rows() << "x" << objT.cols() << ")" << std::endl;
+      // // Print dimensions
+      // std::cout << "Mesh dimensions: V(" << objV.rows() << "x" << objV.cols() 
+      // << "), F(" << objF.rows() << "x" << objF.cols() 
+      // << "), T(" << objT.rows() << "x" << objT.cols() << ")" << std::endl;
 
     }
     

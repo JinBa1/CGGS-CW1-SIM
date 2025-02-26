@@ -22,35 +22,75 @@ double currTime = 0;
 double timeStep = 0.02; //assuming 50 fps
 double CRCoeff = 1.0;
 double tolerance = 1e-3;
-int maxIterations = 10000;
+int maxIterations = 100000; //init value 10 000
 
 Scene scene;
 
 void callback_function() {
-  ImGui::PushItemWidth(50);
+  ImGui::PushItemWidth(150);
   
   ImGui::TextUnformatted("Animation Parameters");
   ImGui::Separator();
   bool changed = ImGui::Checkbox("isAnimating", &isAnimating);
-  ImGui::Checkbox("Enable Metrics", &scene.enableMetrics); // toggle for metrics
+  ImGui::Checkbox("Enable Metrics", &scene.enableMetrics);
+
+  // Acceleration methods section
+  if (ImGui::CollapsingHeader("Acceleration Techniques", ImGuiTreeNodeFlags_DefaultOpen)) {
+    // Collision detection acceleration
+    ImGui::Text("Collision Detection:");
+    int collisionMethod = static_cast<int>(scene.collisionAccelMethod);
+    if (ImGui::RadioButton("Brute Force (O(n²))", &collisionMethod, 0)) {
+      scene.collisionAccelMethod = Scene::CollisionAcceleration::None;
+    }
+    if (ImGui::RadioButton("Spatial Hash Grid", &collisionMethod, 1)) {
+      scene.collisionAccelMethod = Scene::CollisionAcceleration::SpatialHash;
+    }
+    // Uncomment if BVH is implemented
+    /*
+    if (ImGui::RadioButton("Bounding Volume Hierarchy", &collisionMethod, 2)) {
+      scene.collisionAccelMethod = Scene::CollisionAcceleration::BVH;
+    }
+    */
+    
+    // Spatial hash grid options
+    if (scene.collisionAccelMethod == Scene::CollisionAcceleration::SpatialHash) {
+      ImGui::Indent();
+      ImGui::Checkbox("Auto-adjust Grid Size", &scene.autoAdjustGridSize);
+      if (!scene.autoAdjustGridSize) {
+        ImGui::SliderFloat("Grid Cell Size", &scene.spatialGridCellSize, 0.1f, 10.0f);
+      }
+      ImGui::Unindent();
+    }
+    
+    // Constraint solver acceleration
+    ImGui::Text("Constraint Solver:");
+    int solverMethod = static_cast<int>(scene.constraintSolverMethod);
+    if (ImGui::RadioButton("Sequential Processing", &solverMethod, 0)) {
+      scene.constraintSolverMethod = Scene::ConstraintSolver::Sequential;
+    }
+    if (ImGui::RadioButton("Island-based Processing", &solverMethod, 1)) {
+      scene.constraintSolverMethod = Scene::ConstraintSolver::Islands;
+    }
+  }
 
   // Benchmark controls
-  if (ImGui::Button("Start 500-Frame Benchmark")) {
-    scene.benchmarkRunning = true;
-    scene.benchmarkFrameCount = 0;
-    scene.metrics.resetAccumulativeMetrics();
-  }
-  
-  ImGui::InputInt("Benchmark Frames", &scene.benchmarkTargetFrames);
-
-
-  if (scene.enableMetrics) {
-    if (ImGui::Button("Show Accumulative Metrics")) {
-      scene.metrics.printAccumulative();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Reset Accumulative Metrics")) {
+  if (ImGui::CollapsingHeader("Benchmarking", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::Button("Start 500-Frame Benchmark")) {
+      scene.benchmarkRunning = true;
+      scene.benchmarkFrameCount = 0;
       scene.metrics.resetAccumulativeMetrics();
+    }
+    
+    ImGui::InputInt("Benchmark Frames", &scene.benchmarkTargetFrames);
+    
+    if (scene.enableMetrics) {
+      if (ImGui::Button("Show Accumulative Metrics")) {
+        scene.metrics.printAccumulative();
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Reset Accumulative Metrics")) {
+        scene.metrics.resetAccumulativeMetrics();
+      }
     }
   }
 
@@ -82,7 +122,7 @@ void callback_function() {
 int main()
 {
   
-  scene.load_scene("tower_chain-scene.txt","tower_chain-constraints.txt");
+  scene.load_scene("cube_6-scene.txt","cube_6-constraints.txt");
   polyscope::init();
   
   scene.update_scene(0.0, CRCoeff, maxIterations, tolerance);
