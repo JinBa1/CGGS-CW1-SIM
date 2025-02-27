@@ -16,6 +16,9 @@
 #include "spatial_hash.h"
 #include "constraint_graph.h"
 
+#include "parallel_constraint_solver.h"
+#include "propagation_constraint_solver.h"
+
 using namespace Eigen;
 using namespace std;
 
@@ -161,7 +164,9 @@ public:
 
   enum class ConstraintSolver {
     Sequential,      // Process constraints sequentially (original method)
-    Islands          // Process constraints by independent islands
+    Islands,          // Process constraints by independent islands
+    ParallelIslands,   // Process islands in parallel using OpenMP
+    PropagationIslands // Process islands with dependency propagation
   };
   
   // Configuration for acceleration techniques
@@ -169,6 +174,10 @@ public:
   ConstraintSolver constraintSolverMethod = ConstraintSolver::Sequential;
   float spatialGridCellSize = 2.0f;
   bool autoAdjustGridSize = true;
+
+  // Parallelism settings
+  int numThreads = 1; // Default number of threads to use
+  
   
   //adding an objects. You do not need to update this generally
   void add_mesh(const MatrixXd& V, const MatrixXi& F, const MatrixXi& T, const double density, const bool isFixed, const RowVector3d& COM, const RowVector4d& orientation){
@@ -432,6 +441,24 @@ public:
     auto constraintResolutionStart = std::chrono::high_resolution_clock::now();
     
     switch (constraintSolverMethod) {
+      case ConstraintSolver::ParallelIslands: {
+        // Build the constraint graph and identify islands
+        constraintGraph.buildGraph(constraints);
+        
+        // Use the new parallel solver
+        solveConstraintsParallel(constraints, constraintGraph, meshes, maxIterations, tolerance, &metrics);
+        break;
+      }
+
+      case ConstraintSolver::PropagationIslands: {
+        // Build the constraint graph and identify islands
+        constraintGraph.buildGraph(constraints);
+        
+        // Use the new propagation-based solver
+        solveConstraintsPropagation(constraints, constraintGraph, meshes, maxIterations, tolerance, &metrics);
+        break;
+      }
+
       case ConstraintSolver::Islands: {
         // Build the constraint graph and identify islands
         constraintGraph.buildGraph(constraints);

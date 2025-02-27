@@ -5,6 +5,16 @@ project(CourseWork1Simulation)
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 
+# Find OpenMP
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    message(STATUS "OpenMP found! Enabling parallel processing")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    add_compile_definitions(HAVE_OPENMP)
+else()
+    message(WARNING "OpenMP not found. Parallel processing will be disabled.")
+endif()
+
 # Specify the directories for Eigen and Polyscope
 set(EIGEN3_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/../external/eigen)
 set(POLYSCOPE_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/../external/polyscope/include)
@@ -18,6 +28,11 @@ target_include_directories(common_includes INTERFACE
     ${POLYSCOPE_INCLUDE_DIR}
     ${CW0_INCLUDE_DIR}
 )
+
+# Link OpenMP to common_includes if found
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(common_includes INTERFACE OpenMP::OpenMP_CXX)
+endif()
 
 add_compile_definitions(DATA_PATH="${PROJECT_SOURCE_DIR}/../data")
 set(TUTORIAL_DATA_PATH ${PROJECT_SOURCE_DIR}/../data CACHE PATH "location of tutorial data resources")

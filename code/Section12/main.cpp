@@ -71,6 +71,24 @@ void callback_function() {
     if (ImGui::RadioButton("Island-based Processing", &solverMethod, 1)) {
       scene.constraintSolverMethod = Scene::ConstraintSolver::Islands;
     }
+    if (ImGui::RadioButton("Parallel Island Processing", &solverMethod, 2)) {
+      scene.constraintSolverMethod = Scene::ConstraintSolver::ParallelIslands;
+    }
+    if (ImGui::RadioButton("Propagation-based Processing", &solverMethod, 3)) {
+      scene.constraintSolverMethod = Scene::ConstraintSolver::PropagationIslands;
+    }
+
+    // // Display current OpenMP settings
+    // ImGui::Text("Parallelism Info:");
+    // #ifdef _OPENMP
+    // ImGui::Text("OpenMP: Enabled, Max Threads: %d", omp_get_max_threads());
+    // int activeThreads = ImGui::SliderInt("Active Threads", &scene.numThreads, 1, omp_get_max_threads());
+    // if (activeThreads) {
+    //   omp_set_num_threads(scene.numThreads);
+    // }
+    // #else
+    // ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "OpenMP: Disabled (Compile with OpenMP for parallel processing)");
+    // #endif
   }
 
   // Benchmark controls
