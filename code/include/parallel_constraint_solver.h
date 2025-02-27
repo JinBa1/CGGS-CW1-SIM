@@ -34,6 +34,7 @@ int solveConstraintsParallel(
     std::vector<MeshType>& meshes,
     int maxIterations,
     double tolerance,
+    int numThreads,
     MetricsType* metrics = nullptr) 
 {
     const auto& islands = constraintGraph.getIslands();
@@ -44,6 +45,7 @@ int solveConstraintsParallel(
     int constraintsResolvedCount = 0;
     
     #ifdef _OPENMP
+    omp_set_num_threads(numThreads);
     #pragma omp parallel reduction(+:constraintIterationsCount, constraintsResolvedCount)
     {
         #pragma omp for schedule(dynamic)

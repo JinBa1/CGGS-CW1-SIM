@@ -158,8 +158,7 @@ public:
   
   enum class CollisionAcceleration {
     None,            // Brute force O(n²) collision checking
-    SpatialHash,     // Spatial hash grid
-    BVH              // Bounding Volume Hierarchy (if implemented)
+    SpatialHash     // Spatial hash grid
   };
 
   enum class ConstraintSolver {
@@ -176,7 +175,7 @@ public:
   bool autoAdjustGridSize = true;
 
   // Parallelism settings
-  int numThreads = 1; // Default number of threads to use
+  int numThreads = 4; // Default number of threads to use
   
   
   //adding an objects. You do not need to update this generally
@@ -376,10 +375,6 @@ public:
         
         break;
       }
-      
-      case CollisionAcceleration::BVH:
-        // BVH implementation would go here
-        // For now, fall through to the brute force method
         
       case CollisionAcceleration::None:
       default: {
@@ -446,7 +441,7 @@ public:
         constraintGraph.buildGraph(constraints);
         
         // Use the new parallel solver
-        solveConstraintsParallel(constraints, constraintGraph, meshes, maxIterations, tolerance, &metrics);
+        solveConstraintsParallel(constraints, constraintGraph, meshes, maxIterations, tolerance, numThreads ,&metrics);
         break;
       }
 
