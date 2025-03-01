@@ -7,7 +7,7 @@
 int main(int argc, char* argv[]) {
     if (argc < 6) {
         std::cerr << "Usage: " << argv[0] << " <scene-file> <constraint-file> <num-frames> "
-                  << "<collision-method> <constraint-method> [output-file]" << std::endl;
+                  << "<collision-method> <constraint-method> [thread-count] [output-file]" << std::endl;
         std::cerr << "Collision methods: 0=Brute, 1=SpatialHash" << std::endl;
         std::cerr << "Constraint methods: 0=Sequential, 1=Islands, 2=ParallelIslands, 3=PropagationIslands" << std::endl;
         return 1;
@@ -18,11 +18,16 @@ int main(int argc, char* argv[]) {
     const int numFrames = std::stoi(argv[3]);
     const int collisionMethod = std::stoi(argv[4]);
     const int constraintMethod = std::stoi(argv[5]);
-    const std::string outputFile = (argc > 6) ? argv[6] : "";
+    // Default to 4 threads if not specified
+    const int threadCount = (argc > 6) ? std::stoi(argv[6]) : 4;
+    
+    // Output file is now the 7th argument (or empty if not provided)
+    const std::string outputFile = (argc > 7) ? argv[7] : "";
 
     Scene scene;
     
     // Configure scene
+    scene.numThreads = threadCount;
     scene.enableMetrics = true;
     scene.collisionAccelMethod = static_cast<Scene::CollisionAcceleration>(collisionMethod);
     scene.constraintSolverMethod = static_cast<Scene::ConstraintSolver>(constraintMethod);
@@ -41,7 +46,7 @@ int main(int argc, char* argv[]) {
     double timeStep = 0.02; // 50 fps
     double CRCoeff = 1.0;
     double tolerance = 1e-3;
-    int maxIterations = 100000;
+    int maxIterations = 100000000;
     
     // Reset metrics
     scene.metrics.resetAccumulativeMetrics();
@@ -62,7 +67,7 @@ int main(int argc, char* argv[]) {
         if (out.is_open()) {
             out << sceneFile << "," << constraintFile << ","
                 << numFrames << "," << collisionMethod << ","
-                << constraintMethod << "," 
+                << constraintMethod << "," << threadCount << ","  // Add thread count
                 // Use the scene metrics instead of manually calculated duration
                 << scene.metrics.totalRunTime << ","
                 << scene.metrics.totalFrames << ","

@@ -7,7 +7,7 @@ import time
 from itertools import product
 
 def run_benchmark(executable_path, scene_file, constraint_file, num_frames, collision_method, 
-                 constraint_method, output_file, data_path):
+                 constraint_method, thread_count, output_file, data_path):
     """Run a single benchmark with specified parameters"""
     
     scene_path = os.path.join(data_path, scene_file)
@@ -28,6 +28,7 @@ def run_benchmark(executable_path, scene_file, constraint_file, num_frames, coll
         str(num_frames),
         str(collision_method),
         str(constraint_method),
+        str(thread_count),
         output_file
     ]
     
@@ -48,7 +49,7 @@ def create_output_header(output_file):
             writer = csv.writer(f)
             writer.writerow([
                 'SceneFile', 'ConstraintFile', 'NumFrames', 'CollisionMethod',
-                'ConstraintMethod', 'TotalRunTime(ms)', 'TotalFrames',
+                'ConstraintMethod', 'ThreadCount', 'TotalRunTime(ms)', 'TotalFrames',
                 'CollisionDetectionTime(ms)', 'CollisionResolutionTime(ms)',
                 'ConstraintResolutionTime(ms)', 'CollisionChecks',
                 'CollisionsDetected', 'ConstraintIterations', 'ConstraintsResolved'
@@ -71,6 +72,10 @@ def main():
                         help='Collision methods to test (0=Brute, 1=SpatialHash, 2=BVH)')
     parser.add_argument('--constraint-methods', type=int, nargs='+', default=[0, 1, 2, 3],
                         help='Constraint methods to test (0=Sequential, 1=Islands, 2=ParallelIslands, 3=PropagationIslands)')
+    
+    # Add thread count parameter
+    parser.add_argument('--thread-counts', type=int, nargs='+', default=[4], 
+                        help='Thread counts to test for parallel constraint solving')
     
     args = parser.parse_args()
     
@@ -112,25 +117,32 @@ def main():
             if constraint_file is None:
                 continue
                 
-            for collision_method, constraint_method in product(args.collision_methods, args.constraint_methods):
-                print(f"\nRunning benchmark {rep+1}/{args.repetitions}: "
-                      f"Scene {i+1}/{len(scene_files)}, "
-                      f"Collision method {collision_method}, "
-                      f"Constraint method {constraint_method}")
-                
-                run_benchmark(
-                    args.executable,
-                    scene_file,
-                    constraint_file,
-                    args.num_frames,
-                    collision_method,
-                    constraint_method,
-                    args.output,
-                    args.data_path
-                )
-                
-                # Short delay between benchmarks to let system settle
-                time.sleep(1)
+            for collision_method in args.collision_methods:
+                for constraint_method in args.constraint_methods:
+                    # Only use thread counts for parallel methods (2 is ParallelIslands)
+                    thread_list = args.thread_counts if constraint_method == 2 else [4]
+                    
+                    for thread_count in thread_list:
+                        print(f"\nRunning benchmark {rep+1}/{args.repetitions}: "
+                              f"Scene {i+1}/{len(scene_files)}, "
+                              f"Collision method {collision_method}, "
+                              f"Constraint method {constraint_method}, "
+                              f"Thread count {thread_count}")
+                        
+                        run_benchmark(
+                            args.executable,
+                            scene_file,
+                            constraint_file,
+                            args.num_frames,
+                            collision_method,
+                            constraint_method,
+                            thread_count,  # Pass thread count
+                            args.output,
+                            args.data_path
+                        )
+                        
+                        # Short delay between benchmarks to let system settle
+                        time.sleep(1)
 
 if __name__ == "__main__":
     main()

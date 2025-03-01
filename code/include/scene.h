@@ -64,6 +64,8 @@ public:
     int totalCollisionsDetected = 0;
     int totalConstraintIterations = 0;
     int totalConstraintsResolved = 0;
+
+
     
     // Modified reset method - now only resets per-frame metrics
     void reset() {
@@ -175,7 +177,7 @@ public:
   bool autoAdjustGridSize = true;
 
   // Parallelism settings
-  int numThreads = 4; // Default number of threads to use
+  int numThreads = 16; // Default number of threads to use
   
   
   //adding an objects. You do not need to update this generally

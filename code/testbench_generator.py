@@ -26,6 +26,10 @@ class MultiSceneGenerator:
             'cube': {
                 'objects': [],
                 'constraints': []
+            },
+            'tower_chain' : {
+                'objects' : [],
+                'constraints' : []
             }
         }
         
@@ -39,7 +43,8 @@ class MultiSceneGenerator:
             'stress': ('stress-scene.txt', 'stress-constraints.txt'),
             'two_chain': ('two_chain-scene.txt', 'two_chain-constraints.txt'),
             'two_cylinder': ('two_cylinder-scene.txt', 'two_cylinder-constraints.txt'),
-            'cube': ('cube-scene.txt', 'cube-constraints.txt')
+            'cube': ('cube-scene.txt', 'cube-constraints.txt'),
+            'tower_chain' : ('tower_chain-scene.txt', 'tower_chain-constraints.txt')
         }
         
         for scene_type, (scene_file, constraint_file) in scene_files.items():
@@ -268,7 +273,7 @@ class MultiSceneGenerator:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate test scenes for rigid body simulation")
     
-    parser.add_argument("--scene-type", choices=["stress", "two_chain", "two_cylinder", "cube"], 
+    parser.add_argument("--scene-type", choices=["stress", "two_chain", "two_cylinder", "cube", "tower_chain"], 
                         default="stress", help="Type of scene to duplicate")
     parser.add_argument("--copies", type=int, default=4, help="Number of scene copies to generate")
     parser.add_argument("--output-dir", default="/home/jin/cggs/CGGS-CW1-Simulation/data/", help="Output directory for scene files")

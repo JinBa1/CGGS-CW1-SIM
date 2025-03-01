@@ -22,7 +22,7 @@ double currTime = 0;
 double timeStep = 0.02; //assuming 50 fps
 double CRCoeff = 1.0;
 double tolerance = 1e-3;
-int maxIterations = 100000; //init value 10 000
+int maxIterations = 100000000; //init value 10 000
 
 Scene scene;
 
@@ -131,7 +131,7 @@ void callback_function() {
 int main()
 {
   
-  scene.load_scene("cube_6-scene.txt","cube_6-constraints.txt");
+  scene.load_scene("cube_2-scene.txt","cube_2-constraints.txt");
   polyscope::init();
   
   scene.update_scene(0.0, CRCoeff, maxIterations, tolerance);
